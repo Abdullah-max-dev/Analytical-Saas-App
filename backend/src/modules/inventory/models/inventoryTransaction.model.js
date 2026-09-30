@@ -24,6 +24,11 @@ const inventoryTransactionSchema = new mongoose.Schema(
       enum: ["IN", "OUT"],
       required: true,
     },
+    event: {
+      type: String,
+      enum: ["PURCHASE", "SALE"],
+      required: true
+    },
 
     quantity: {
       type: Number,

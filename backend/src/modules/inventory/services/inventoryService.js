@@ -209,202 +209,118 @@ const getInventory = async ({
 
 // UPDATE INVENTORY
 
+const mongoose = require("mongoose");
+
 const updateInventory = async ({
-
   userId,
-
   productId,
-
   quantity,
-
   lowStockLimit
-
 }) => {
+  const session = await mongoose.startSession();
 
-  // Check product
+  try {
+    session.startTransaction();
 
-  const product = await productModel.findById(productId);
+    // Check product
+    const product = await productModel.findById(productId).session(session);
 
-
-
-  if (!product) {
-
-    const error = new Error(
-
-      "Product not found"
-
-    );
-
-    error.statusCode = 404;
-
-    throw error;
-
-  }
-
-
-
-  const organizationId = product.organizationId;
-
-
-
-  // Check organization access
-
-  await checkOrganizationAccess(
-
-    organizationId,
-
-    userId
-
-  );
-
-
-
-  // Find existing inventory
-
-  let inventory = await inventoryModel.findOne({
-
-    organizationId,
-
-    productId
-
-  });
-
-
-
-  // Previous quantity
-
-  const previousQuantity =
-
-    inventory?.quantity || 0;
-
-
-
-  // If inventory doesn't exist, create it
-
-  if (!inventory) {
-
-    inventory = new inventoryModel({
-
-      organizationId,
-
-      productId,
-
-      quantity: 0,
-
-      lowStockLimit: 10
-
-    });
-
-  }
-
-
-
-  // Calculate stock difference
-
-  const difference =
-
-    quantity - previousQuantity;
-
-
-
-  // Update quantity
-
-  inventory.quantity = quantity;
-
-
-
-  // Update low stock limit if provided
-
-  if (lowStockLimit !== undefined) {
-
-    inventory.lowStockLimit =
-
-      lowStockLimit;
-
-  }
-
-
-
-  // User who updated inventory
-
-  inventory.updatedBy = userId;
-
-
-
-  // Save inventory
-
-  await inventory.save();
-
-
-
-  // Create transaction only if quantity changed
-
-  if (difference !== 0) {
-
-    await inventoryTransactionModel.create({
-
-      organizationId,
-
-      productId,
-
-      type: difference > 0 ? "IN" : "OUT",
-
-      quantity: Math.abs(difference),
-
-      previousQuantity,
-
-      newQuantity: quantity,
-
-      createdBy: userId
-
-    });
-
-  }
-
-
-
-  const stockStatus =
-
-    inventory.quantity <= inventory.lowStockLimit
-
-      ? "low_stock"
-
-      : "in_stock";
-
-
-
-  return {
-
-    inventory: {
-
-      ...inventory.toObject(),
-
-      stockStatus
-
-    },
-
-    calculation: {
-
-      previousQuantity,
-
-      newQuantity: quantity,
-
-      difference
-
+    if (!product) {
+      const error = new Error("Product not found");
+      error.statusCode = 404;
+      throw error;
     }
 
-  };
+    const organizationId = product.organizationId;
 
+    // Check organization access
+    await checkOrganizationAccess(organizationId, userId);
+
+    // Find existing inventory
+    let inventory = await inventoryModel.findOne({
+      organizationId,
+      productId
+    }).session(session);
+
+    // Previous quantity
+    // Previous quantity
+const previousQuantity = inventory ? inventory.quantity : 0;
+
+// Quantity jo user add kar raha hai
+const addedQuantity = quantity;
+
+// Final quantity
+const newQuantity = previousQuantity + addedQuantity;
+
+// Difference
+const difference = newQuantity - previousQuantity;
+
+    // Create inventory if it doesn't exist
+    if (!inventory) {
+      inventory = new inventoryModel({
+        organizationId,
+        productId,
+        quantity: 0,
+        lowStockLimit: 10
+      });
+    }
+
+    // Update inventory
+    inventory.quantity = newQuantity;
+
+    if (lowStockLimit !== undefined) {
+      inventory.lowStockLimit = lowStockLimit;
+    }
+
+    inventory.updatedBy = userId;
+
+    await inventory.save({ session });
+
+    // Create transaction only if quantity changed
+    if (difference !== 0) {
+    await inventoryTransactionModel.create(
+      [{
+        organizationId,
+        productId,
+        type: difference > 0 ? "IN" : "OUT",
+        quantity: Math.abs(difference),
+        previousQuantity,
+        newQuantity,
+        createdBy: userId
+      }],
+      { session }
+    );
+  }
+
+    await session.commitTransaction();
+
+    const stockStatus =
+      inventory.quantity <= inventory.lowStockLimit
+        ? "low_stock"
+        : "in_stock";
+
+    return {
+      inventory: {
+        ...inventory.toObject(),
+        stockStatus
+      },
+      calculation: {
+        previousQuantity,
+        newQuantity,
+        difference,
+        overallQuantity: inventory.quantity
+      }
+    };
+  } catch (error) {
+    await session.abortTransaction();
+    throw error;
+  } finally {
+    await session.endSession();
+  }
 };
 
-
-
 module.exports = {
-
   getAllInventory,
-
   getInventory,
-
   updateInventory
-
 };
