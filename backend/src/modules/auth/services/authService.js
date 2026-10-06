@@ -110,13 +110,17 @@ const loginUser = async ({
     }
 
     const organization = user.organizations[0];
+//     console.log("USER ORGANIZATIONS:", user.organizations);
+// console.log("ORGANIZATION:", organization);
+// console.log("ORGANIZATION ID:", organization.organizationId);
+
 
     // 5. Create session
     // new() use kar rahe hain taake session._id
     // save se pehle hi available ho jaye
     const session = new sessionModel({
         userId: user._id,
-        organizationId: organization.organizationId,
+        activeOrganizationId: organization.organizationId,
         ip,
         userAgent,
         expiresAt: new Date(

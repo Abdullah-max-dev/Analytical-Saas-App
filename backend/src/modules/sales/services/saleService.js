@@ -1,101 +1,81 @@
 const mongoose = require("mongoose");
 
-const saleModel = require("./sales.model");
-const productModel = require("../product/product.model");
-const inventoryModel = require("../inventory/inventory.model");
-const transactionModel = require("../inventory/transaction.model");
+const saleModel = require("../models/sales.model");
+const productModel = require("../../product/models/product.model");
+const inventoryModel = require("../../inventory/models/inventory.model");
+const inventoryTransactionModel = require("../../inventory/models/inventoryTransaction.model");
 
-const createSaleService = async ({
-    organizationId,
-    customerId,
-    items,
-    userId
-}) => {
+const AppError = (message, statusCode) => {
+    const error = new Error(message);
+    error.statusCode = statusCode;
+    return error;
+};
 
+// CREATE SALE
+const createSale = async ({ organizationId, userId, customerId, items }) => {
     const session = await mongoose.startSession();
 
     try {
-
         let createdSale;
 
         await session.withTransaction(async () => {
-
-            let totalAmount = 0;
+            const saleId = new mongoose.Types.ObjectId();
             const saleItems = [];
+            let totalAmount = 0;
 
-            for (const item of items) {
+            for (const { productId, quantity } of items) {
+                // console.log("Product ID:", productId);
+                // console.log("Organization ID:", organizationId);
 
-                const { productId, quantity } = item;
-
-                // 1. Check product belongs to organization
-                const product = await productModel.findOne({
-                    _id: productId,
-                    organizationId
-                }).session(session);
+                // 1. Product isi org ka hona chahiye
+                const product = await productModel
+                    .findOne({ _id: productId, organizationId })
+                    .session(session);
 
                 if (!product) {
-                    throw new Error(
-                        `Product ${productId} not found in this organization`
-                    );
+                    throw AppError(`Product ${productId}, ${organizationId} not found`, 404);
                 }
 
-                // 2. Get inventory
-                const inventory = await inventoryModel.findOne({
-                    organizationId,
-                    productId
-                }).session(session);
-
-                if (!inventory) {
-                    throw new Error(
-                        `Inventory not found for product ${productId}`
-                    );
-                }
-
-                const updatedInventory = await inventoryModel.findOneAndUpdate(
-                    {
-                        organizationId,
-                        productId,
-                        quantity: { $gte: quantity }
-                    },
-                    {
-                        $inc: {
-                            quantity: -quantity
-                        },
-                        $set: {
-                            updatedBy: userId
-                        }
-                    },
-                    {
-                        new: true,
-                        session
-                    }
+                // 2. Atomic stock deduction (race condition safe)
+                const inventory = await inventoryModel.findOneAndUpdate(
+                    { organizationId, productId, quantity: { $gte: quantity } },
+                    { $inc: { quantity: -quantity }, $set: { updatedBy: userId } },
+                    { new: true, session }
                 );
 
-                if (!updatedInventory) {
-                    throw new Error(
-                        `Insufficient stock for product ${product.name}`
-                    );
+                if (!inventory) {
+                    throw AppError(`Insufficient stock for ${product.name}`, 400);
                 }
 
-                await transactionModel.create(
+                // 3. Stock ledger entry
+                await inventoryTransactionModel.create(
                     [{
                         organizationId,
                         productId,
                         type: "OUT",
+                        event: "SALE",
                         quantity,
-                        previousQuantity: inventory.quantity,
-                        newQuantity: updatedInventory.quantity,
+                        previousQuantity: inventory.quantity + quantity,
+                        newQuantity: inventory.quantity,
+                        referenceId: saleId,
+                        referenceModel: "Sale",
                         createdBy: userId
                     }],
                     { session }
                 );
+
+                // 4. Price snapshot DB se
+                const total = product.price * quantity;
+                totalAmount += total;
+
+                saleItems.push({ productId, quantity, price: product.price, total });
             }
 
-            // 3. Create sale
+            // 5. Sale create
             const [sale] = await saleModel.create(
                 [{
+                    _id: saleId,
                     organizationId,
-                    customerId,
                     items: saleItems,
                     totalAmount,
                     createdBy: userId
@@ -113,6 +93,37 @@ const createSaleService = async ({
     }
 };
 
-module.exports = {
-    createSaleService
+// GET ALL SALES (dashboard)
+const getSales = async ({ organizationId, page = 1, limit = 20 }) => {
+    const skip = (page - 1) * limit;
+
+    const [sales, total] = await Promise.all([
+        saleModel
+            .find({ organizationId })
+            .populate("items.productId", "name sku")
+            .populate("createdBy", "name username")
+            .sort({ saleDate: -1 })
+            .skip(skip)
+            .limit(limit),
+        saleModel.countDocuments({ organizationId })
+    ]);
+
+    return {
+        sales,
+        pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
+    };
 };
+
+// GET SINGLE SALE
+const getSale = async ({ organizationId, saleId }) => {
+    const sale = await saleModel
+        .findOne({ _id: saleId, organizationId })
+        .populate("items.productId", "name sku")
+        .populate("createdBy", "name username");
+
+    if (!sale) throw AppError("Sale not found", 404);
+
+    return sale;
+};
+
+module.exports = { createSale, getSales, getSale };

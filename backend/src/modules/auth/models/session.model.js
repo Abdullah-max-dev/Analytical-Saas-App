@@ -9,7 +9,8 @@ const sessionSchema = new mongoose.Schema({
     },
     activeOrganizationId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: "Tenant"
+        ref: "Tenant",
+        required: [true, "organization Id is required"]
     },
     refreshTokenHash: {
         type: String,

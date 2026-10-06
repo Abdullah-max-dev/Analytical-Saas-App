@@ -84,11 +84,10 @@ const authMiddleware = async (req, res, next) => {
         // 6. Request mein authentication data save karo
         req.user = user;
         req.session = session;
-        req.organizationId = session.organizationId;
-        console.log("Organization ID:", req.organizationId);
+        req.organizationId = session.activeOrganizationId;
 
-        console.log("AUTH USER:", req.user._id);
-        console.log("AUTH SESSION:", req.session._id);
+        // console.log("AUTH USER:", req.user._id);
+        // console.log("AUTH SESSION:", req.session._id);
 
         next();
 

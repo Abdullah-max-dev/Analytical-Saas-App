@@ -29,7 +29,8 @@ const inventoryTransactionSchema = new mongoose.Schema(
       enum: ["PURCHASE", "SALE"],
       required: true
     },
-
+    referenceId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    referenceModel: { type: String, enum: ["Sale", "Purchase", null], default: null },  
     quantity: {
       type: Number,
       required: true,

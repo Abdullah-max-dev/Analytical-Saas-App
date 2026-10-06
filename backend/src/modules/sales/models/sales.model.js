@@ -9,11 +9,11 @@ const saleSchema = new mongoose.Schema(
         required: true
     },
 
-    customerId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Customer",
-        required: true
-    },
+    // customerId: {
+    //     type: mongoose.Schema.Types.ObjectId,
+    //     ref: "Customer",
+    //     required: true
+    // },
 
     items: [
         {
